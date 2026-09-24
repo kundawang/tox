@@ -1,14 +1,17 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import pytest
 
-from tox.config.loader.replacer import MatchExpression, find_replace_expr
+from tox.config.loader.api import ConfigLoadArgs
+from tox.config.loader.replacer import MatchExpression, find_replace_expr, replace_factor
 from tox.report import HandledError
 
 if TYPE_CHECKING:
     from tests.config.loader.conftest import ReplaceOne
+    from tox.config.main import Config
 
 
 @pytest.mark.parametrize(
@@ -96,3 +99,40 @@ def test_dont_replace(replace_one: ReplaceOne, value: str, exp_exception: str | 
 def test_match_expression_repr(match_expression: MatchExpression, exp_repr: str) -> None:
     print(match_expression)  # ruff:ignore[print]
     assert repr(match_expression) == exp_repr
+
+
+class _FactorLabelConf:
+    """Minimal stand-in for :class:`tox.config.main.Config` carrying factor labels."""
+
+    factor_labels: ClassVar[dict[str, Any]] = {
+        "django": SimpleNamespace(values=["django42", "django50"], default="django50"),
+    }
+
+
+@pytest.mark.parametrize(
+    ("env_name", "args", "override", "expected"),
+    [
+        pytest.param("task-django42", ["django"], None, "django42", id="active-factor"),
+        pytest.param("other", ["django"], None, "django50", id="group-default"),
+        pytest.param("other", ["django", "django42"], None, "django42", id="inline-fallback-beats-group-default"),
+        pytest.param("other", ["django", ""], None, "", id="empty-fallback-beats-group-default"),
+        pytest.param("other", ["unknown", ""], None, "", id="unknown-label-empty-fallback"),
+        pytest.param("task-django42", ["django", ""], None, "django42", id="active-factor-beats-empty-fallback"),
+        pytest.param("task-django42", ["django"], "django60", "django60", id="override-beats-active-factor"),
+        pytest.param("task-django42", ["django"], "", "", id="empty-override-beats-active-factor"),
+        pytest.param("other", ["django"], "", "", id="empty-override-beats-group-default"),
+        pytest.param(None, ["django", ""], None, "", id="core-empty-fallback"),
+    ],
+)
+def test_replace_factor_priority(
+    monkeypatch: pytest.MonkeyPatch,
+    env_name: str | None,
+    args: list[str],
+    override: str | None,
+    expected: str,
+) -> None:
+    """``{factor:label}`` resolves as: override > active factor > inline fallback > group default."""
+    if override is not None:
+        monkeypatch.setenv("TOX_FACTOR_django", override)
+    conf_args = ConfigLoadArgs(chain=[], name=env_name, env_name=env_name)
+    assert replace_factor(cast("Config", _FactorLabelConf()), args, conf_args) == expected

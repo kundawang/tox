@@ -615,3 +615,83 @@ def test_env_base_factor_group_default_reaches_deps(tox_project: ToxProjectCreat
     outcome = project.run("c", "-e", "task-42", "-k", "deps")
     outcome.assert_success()
     outcome.assert_out_err("[testenv:task-42]\ndeps = Django==42\n", "")
+
+
+@pytest.mark.parametrize(
+    ("key", "value", "expected"),
+    [
+        pytest.param("description", '"[{factor:django_version:}]"', "description = []", id="description"),
+        pytest.param("deps", '["Django=={factor:django_version:}"]', "deps = Django==", id="deps"),
+        pytest.param("set_env", "{ DJ = '{factor:django_version:}' }", "DJ=", id="set-env"),
+        pytest.param("commands", '[["echo", "{factor:django_version:}"]]', "commands = echo ''", id="commands"),
+    ],
+)
+def test_env_base_factor_empty_fallback_beats_group_default(
+    tox_project: ToxProjectCreator, key: str, value: str, expected: str
+) -> None:
+    project = tox_project({
+        "tox.toml": textwrap.dedent(f"""\
+            [env_base.task]
+            factors = [{{django_version = {{values = ["django42", "django50"], default = "django50"}}}}]
+            package = "skip"
+
+            [env.other]
+            {key} = {value}
+            """),
+    })
+    outcome = project.run("c", "-e", "other", "-k", key)
+    outcome.assert_success()
+    assert expected in outcome.out
+
+
+def test_env_base_factor_empty_fallback_beats_group_default_via_run_base(tox_project: ToxProjectCreator) -> None:
+    project = tox_project({
+        "tox.toml": textwrap.dedent("""\
+            [env_base.task]
+            factors = [{django_version = {values = ["django42", "django50"], default = "django50"}}]
+            package = "skip"
+
+            [env_run_base]
+            description = "[{factor:django_version:}]"
+
+            [env.other]
+            """),
+    })
+    outcome = project.run("c", "-e", "other", "-k", "description")
+    outcome.assert_success()
+    outcome.assert_out_err("[testenv:other]\ndescription = []\n", "")
+
+
+def test_env_base_factor_empty_fallback_beats_range_group_default(tox_project: ToxProjectCreator) -> None:
+    project = tox_project({
+        "tox.toml": textwrap.dedent("""\
+            [env_base.task]
+            factors = [{py_version = {prefix = "3.", start = 13, stop = 14, default = "3.14"}}]
+            package = "skip"
+
+            [env.other]
+            description = "[{factor:py_version:}]"
+            """),
+    })
+    outcome = project.run("c", "-e", "other", "-k", "description")
+    outcome.assert_success()
+    outcome.assert_out_err("[testenv:other]\ndescription = []\n", "")
+
+
+def test_env_base_factor_empty_override_beats_group_default_outside_matrix(
+    tox_project: ToxProjectCreator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TOX_FACTOR_django_version", "")
+    project = tox_project({
+        "tox.toml": textwrap.dedent("""\
+            [env_base.task]
+            factors = [{django_version = {values = ["django42", "django50"], default = "django50"}}]
+            package = "skip"
+
+            [env.other]
+            description = "[{factor:django_version}]"
+            """),
+    })
+    outcome = project.run("c", "-e", "other", "-k", "description")
+    outcome.assert_success()
+    outcome.assert_out_err("[testenv:other]\ndescription = []\n", "")
