@@ -225,6 +225,7 @@ class SetEnv:
             if override or (key not in self._raw and key not in self._materialized):
                 value = param.load(key) if isinstance(param, SetEnv) else param[key]
                 self._materialized[key] = value
+                self._markers.pop(key, None)  # an unconditional value clears any previous marker
                 self.changed = True
 
 

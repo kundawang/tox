@@ -550,6 +550,34 @@ def test_set_env_unconditional_override(eval_set_env: EvalSetEnv, of_type: Confi
     assert set_env.load("FOO") == "unconditional"
 
 
+def test_set_env_update_clears_marker() -> None:
+    set_env = SetEnv("FOO=conditional; sys_platform == 'nonexistent'", "py", "py", Path())
+    assert "FOO" not in set_env
+    set_env.update({"FOO": "unconditional"}, override=True)
+    assert "FOO" in set_env
+    assert set_env.load("FOO") == "unconditional"
+
+
+def test_set_env_update_from_set_env_clears_marker() -> None:
+    set_env = SetEnv("FOO=conditional; sys_platform == 'nonexistent'", "py", "py", Path())
+    other = SetEnv("FOO=unconditional", "py", "py", Path())
+    set_env.update(other, override=True)
+    assert "FOO" in set_env
+    assert set_env.load("FOO") == "unconditional"
+
+
+def test_set_env_update_no_override_keeps_marker() -> None:
+    set_env = SetEnv("FOO=conditional; sys_platform == 'nonexistent'", "py", "py", Path())
+    set_env.update({"FOO": "unconditional"}, override=False)
+    assert "FOO" not in set_env
+
+
+def test_set_env_post_process_override_clears_marker(eval_set_env: EvalSetEnv) -> None:
+    set_env = eval_set_env("[testenv]\npackage=skip\nset_env=PYTHONIOENCODING=latin1; sys_platform == 'nonexistent'")
+    assert "PYTHONIOENCODING" in set_env
+    assert set_env.load("PYTHONIOENCODING") == "utf-8"
+
+
 def test_set_env_marker_mixed(eval_set_env: EvalSetEnv) -> None:
     marker = f"sys_platform == '{sys.platform}'"
     config = (
