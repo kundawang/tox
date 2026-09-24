@@ -367,13 +367,13 @@ class ToxSpinner(Spinner):
 
 def _next_completed(
     future_to_env: dict[Future[ToxEnvRunResult], ToxEnv],
-    interrupt: Event,
+    interrupt: Event | None,
 ) -> Future[ToxEnvRunResult] | None:
     while True:
         done_futures, _ = wait_futures(list(future_to_env), timeout=1, return_when=FIRST_COMPLETED)
         if done_futures:
             return done_futures.pop()
-        if interrupt.is_set():
+        if interrupt is not None and interrupt.is_set():
             return None
 
 
@@ -437,6 +437,7 @@ def _do_queue_and_wait(  # ruff:ignore[complex-structure, too-many-arguments, to
 
         env_list: list[str] = []
         stop_scheduling = False
+        interrupted = False
         fail_fast_enabled = options.parsed.fail_fast or any(
             cast("RunToxEnv", state.envs[env]).conf["fail_fast"] for env in to_run_list
         )
@@ -457,45 +458,51 @@ def _do_queue_and_wait(  # ruff:ignore[complex-structure, too-many-arguments, to
                     future_to_env[future] = tox_env_to_run
                 env_list = env_list[len(envs_to_queue) :]
 
+                if not interrupted and interrupt.is_set():
+                    # user interrupt: stop scheduling, cancel what has not started and interrupt the rest, then
+                    # keep collecting their results below so the interrupt logs captured in their output are
+                    # preserved instead of being dropped while other environments finish
+                    interrupted = True
+                    env_list = []
+                    for pending_future, pending_env in list(future_to_env.items()):
+                        if not pending_future.cancel() and not pending_future.done():
+                            pending_env.interrupt()
+
                 if not future_to_env:
                     result: ToxEnvRunResult | None = None
                 else:
-                    completed_future = _next_completed(future_to_env, interrupt)
-                    if completed_future is None:
-                        for pending_future, pending_env in list(future_to_env.items()):
-                            if not pending_future.cancel() and not pending_future.done():
-                                pending_env.interrupt()
-                        future_to_env.clear()
+                    # once interrupted keep waiting for the running environments to finish so their output
+                    # (including the interrupt logs) can be collected and shown
+                    completed_future = _next_completed(future_to_env, None if interrupted else interrupt)
+                    if completed_future is None:  # interrupt set while waiting, handled at the top of the loop
+                        continue
+                    tox_env_done = future_to_env.pop(completed_future)
+                    try:
+                        result = completed_future.result()
+                    except CancelledError:
+                        tox_env_done.teardown()
+                        was_interrupted = interrupt.is_set()
+                        result = ToxEnvRunResult(
+                            name=tox_env_done.conf.name,
+                            skipped=not was_interrupted,
+                            code=-3 if was_interrupted else -2,
+                            outcomes=[],
+                            duration=MISS_DURATION,
+                        )
+                    results.append(result)
+                    completed.add(result.name)
+                    if (
+                        result.code != Outcome.OK
+                        and not result.skipped
+                        and not result.ignore_outcome
+                        and (options.parsed.fail_fast or result.fail_fast)
+                    ):
+                        # stop scheduling new work but let running environments finish: only a user interrupt
+                        # abandons them (cancel only stops futures the executor has not started yet)
+                        stop_scheduling = True
                         env_list = []
-                        result = None
-                    else:
-                        tox_env_done = future_to_env.pop(completed_future)
-                        try:
-                            result = completed_future.result()
-                        except CancelledError:
-                            tox_env_done.teardown()
-                            was_interrupted = interrupt.is_set()
-                            result = ToxEnvRunResult(
-                                name=tox_env_done.conf.name,
-                                skipped=not was_interrupted,
-                                code=-3 if was_interrupted else -2,
-                                outcomes=[],
-                                duration=MISS_DURATION,
-                            )
-                        results.append(result)
-                        completed.add(result.name)
-                        if (
-                            result.code != Outcome.OK
-                            and not result.skipped
-                            and not result.ignore_outcome
-                            and (options.parsed.fail_fast or result.fail_fast)
-                        ):
-                            # stop scheduling new work but let running environments finish: only a user interrupt
-                            # abandons them (cancel only stops futures the executor has not started yet)
-                            stop_scheduling = True
-                            env_list = []
-                            for pending_future in list(future_to_env.keys()):
-                                pending_future.cancel()
+                        for pending_future in list(future_to_env.keys()):
+                            pending_future.cancel()
 
                 if not interrupt.is_set() and not stop_scheduling and not env_list:
                     env_list = next(envs_to_run_generator, [])

@@ -179,6 +179,58 @@ def test_parallels_help(tox_project: ToxProjectCreator) -> None:
     outcome.assert_success()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="You need a conhost shell for keyboard interrupt")
+@pytest.mark.flaky(max_runs=3, min_passes=1)
+def test_keyboard_interrupt_keeps_env_output(tox_project: ToxProjectCreator, tmp_path: Path) -> None:
+    script = dedent(f"""\
+        import signal
+        import sys
+        from pathlib import Path
+        from time import sleep
+
+        name = sys.argv[1]
+
+
+        def on_interrupt(signum, frame):
+            signal.signal(signal.SIGINT, signal.SIG_IGN)  # ignore repeated interrupts while shutting down
+            sleep(2)  # take a moment so the driver thread observes the interrupt before we finish
+            print("farewell of", name, 40 + 3, flush=True)
+            sys.exit(3)
+
+
+        signal.signal(signal.SIGINT, on_interrupt)
+        print("output of", name, "done", 40 + 2, flush=True)
+        Path(r"{tmp_path!s}", name).write_text("")
+        sleep(100)
+        """)
+    ini = """
+    [tox]
+    no_package=true
+    env_list=a,b
+    [testenv]
+    interrupt_timeout=5
+    commands=python script.py {env_name}
+    """
+    proj = tox_project({"tox.ini": ini, "script.py": script})
+    cmd = ["-c", str(proj.path / "tox.ini"), "p", "-p", "2"]
+    process = Popen([sys.executable, "-m", "tox", *cmd], stdout=PIPE, stderr=PIPE, universal_newlines=True)
+    markers = [tmp_path / "a", tmp_path / "b"]
+    while not all(marker.exists() for marker in markers) and (process.poll() is None):
+        sleep(0.05)
+    process.send_signal(SIGINT)
+    out, _err = process.communicate()
+    assert process.returncode != 0
+    assert "KeyboardInterrupt - teardown started\n" in out, out
+    # the interrupted environments' captured output must be shown, not lost (the computed numbers
+    # cannot come from the echoed command line, only from the actual command output)
+    assert "output of a done 42" in out, out
+    assert "output of b done 42" in out, out
+    assert "farewell of a 43" in out, out
+    assert "farewell of b 43" in out, out
+    assert "interrupt tox environment: a\n" in out, out
+    assert "interrupt tox environment: b\n" in out, out
+
+
 def test_parallel_legacy_accepts_no_arg(tox_project: ToxProjectCreator) -> None:
     outcome = tox_project({"tox.ini": ""}).run("-p", "-h")
     outcome.assert_success()
