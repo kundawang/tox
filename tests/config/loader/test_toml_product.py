@@ -321,3 +321,21 @@ def test_product_deduplication(tox_project: ToxProjectCreator) -> None:
     result = proj.run("l")
     result.assert_success()
     assert result.out.count("py312-django42") == 1
+
+
+@pytest.mark.parametrize("key", ["start", "stop"])
+@pytest.mark.parametrize("value", ["true", "false"])
+def test_env_list_range_bound_bool_rejected(tox_project: ToxProjectCreator, key: str, value: str) -> None:
+    bounds = {"start": "12", "stop": "14", key: value}
+    project = tox_project({
+        "tox.toml": textwrap.dedent(f"""\
+            env_list = [{{ prefix = "py3", start = {bounds["start"]}, stop = {bounds["stop"]} }}]
+
+            [env_run_base]
+            package = "skip"
+            commands = [["python", "-c", "print('ok')"]]
+        """),
+    })
+    result = project.run("l")
+    result.assert_failed()
+    assert f"failed to load core.env_list: range '{key}' must be an integer, got bool" in result.out
