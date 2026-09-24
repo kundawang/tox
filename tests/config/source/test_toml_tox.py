@@ -210,3 +210,30 @@ def test_config_in_toml_override_env_without_own_table(tox_project: ToxProjectCr
     outcome = project.run("c", "-e", "py", "-k", "description", "-x", "env.py.description=override")
     outcome.assert_success()
     outcome.assert_out_err("[testenv:py]\ndescription = override\n", "")
+
+
+@pytest.mark.parametrize("filename", ["tox.toml", "pyproject.toml"])
+@pytest.mark.parametrize(
+    ("reference", "expected"),
+    [
+        pytest.param("{factor:ecosystem}", "oci", id="group-default"),
+        pytest.param("{factor:ecosystem:}", "", id="empty-fallback-beats-group-default"),
+        pytest.param("{factor:ecosystem:python}", "python", id="inline-fallback-beats-group-default"),
+    ],
+)
+def test_config_in_toml_env_list_factor_group_default_priority(
+    tox_project: ToxProjectCreator, filename: str, reference: str, expected: str
+) -> None:
+    prefix: Final = "tool.tox." if filename == "pyproject.toml" else ""
+    project: Final = tox_project({
+        filename: f"""
+            {"[tool.tox]" if prefix else ""}
+            env_list = [{{ ecosystem = {{ values = ["oci", "python"], default = "oci" }} }}]
+            [{prefix}env_run_base]
+            description = "[{reference}]"
+            [{prefix}env.lint]
+        """,
+    })
+    outcome: Final = project.run("c", "-e", "lint", "-k", "description")
+    outcome.assert_success()
+    outcome.assert_out_err(f"[testenv:lint]\ndescription = [{expected}]\n", "")
