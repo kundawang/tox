@@ -149,11 +149,11 @@ def test_cli_ini_with_interpolated(tmp_path: Path, monkeypatch: MonkeyPatch) -> 
 
 def test_cli_ini_is_utf8(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     to = tmp_path / "tox.ini"
-    to.write_text("[tox]\na = “Grüße”\n", encoding="utf-8")
+    to.write_text("[tox]\na = 中文“Grüße”\n", encoding="utf-8")
     monkeypatch.setenv("TOX_USER_CONFIG_FILE", str(to))
     conf = IniConfig()
     assert conf.has_config_file is True
-    assert conf.get("a", str) == ("“Grüße”", "file")
+    assert conf.get("a", str) == ("中文“Grüße”", "file")
 
 
 @pytest.mark.parametrize(
