@@ -602,6 +602,28 @@ def test_env_base_factor_env_override(
     outcome.assert_out_err(f"[testenv:task-django42]\ndescription = Test [{expected}]\n", "")
 
 
+def test_env_base_factor_env_override_empty_beats_group_default(
+    tox_project: ToxProjectCreator,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TOX_FACTOR_django_version", "")
+    project = tox_project({
+        "tox.toml": textwrap.dedent("""\
+            [env_base.task]
+            factors = [{django_version = {values = ["django42", "django50"], default = "django50"}}]
+            package = "skip"
+            description = "Test [{factor:django_version}]"
+            commands = [["python", "-c", "print('ok')"]]
+
+            [env.other]
+            description = "Test [{factor:django_version}]"
+        """),
+    })
+    outcome = project.run("c", "-e", "other", "-k", "description")
+    outcome.assert_success()
+    outcome.assert_out_err("[testenv:other]\ndescription = Test []\n", "")
+
+
 def test_env_base_factor_group_default_reaches_deps(tox_project: ToxProjectCreator) -> None:
     project = tox_project({
         "tox.toml": textwrap.dedent("""\
