@@ -72,6 +72,20 @@ def test_show_config_filter_keys(tox_project: ToxProjectCreator) -> None:
     outcome.assert_out_err("[testenv:py]\nenv_name = py\n\n[tox]\nno_package = False\n", "")
 
 
+def test_show_config_override_core_section_missing_from_ini(tox_project: ToxProjectCreator) -> None:
+    project = tox_project({"tox.ini": "[testenv]\npackage = skip"})
+    outcome = project.run("c", "-e", "py", "-k", "no_package", "--core", "-x", "tox.no_package=true")
+    outcome.assert_success()
+    outcome.assert_out_err("[testenv:py]\n\n[tox]\nno_package = True\n", "")
+
+
+def test_show_config_override_env_section_missing_from_ini(tox_project: ToxProjectCreator) -> None:
+    project = tox_project({"tox.ini": "[testenv]\npackage = skip"})
+    outcome = project.run("c", "-e", "py", "-k", "description", "-x", "testenv:py.description=override")
+    outcome.assert_success()
+    outcome.assert_out_err("[testenv:py]\ndescription = override\n", "")
+
+
 def test_show_config_unused(tox_project: ToxProjectCreator) -> None:
     tox_ini = "[testenv]\nok=false\n[testenv:py]\nmagical=yes\nmagic=yes"
     outcome = tox_project({"tox.ini": tox_ini}).run("c", "-e", "py")
