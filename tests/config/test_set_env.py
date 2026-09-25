@@ -550,6 +550,32 @@ def test_set_env_unconditional_override(eval_set_env: EvalSetEnv, of_type: Confi
     assert set_env.load("FOO") == "unconditional"
 
 
+def test_set_env_update_clears_marker() -> None:
+    set_env = SetEnv("FOO=conditional; sys_platform == 'nonexistent'", "py", "py", Path())
+    set_env.update({"FOO": "unconditional"}, override=True)
+    assert "FOO" in set_env
+    assert set_env.load("FOO") == "unconditional"
+
+    other = SetEnv(f"BAR=1; sys_platform == '{sys.platform}'", "py", "py", Path())
+    target = SetEnv("BAR=0; sys_platform == 'nonexistent'", "py", "py", Path())
+    target.update(other, override=True)
+    assert "BAR" in target
+    assert target.load("BAR") == "1"
+
+
+def test_set_env_forced_update_clears_marker(eval_set_env: EvalSetEnv) -> None:
+    set_env = eval_set_env("[testenv]\npackage=skip\nset_env=PYTHONIOENCODING=ascii; sys_platform == 'nonexistent'")
+    assert "PYTHONIOENCODING" in set_env
+    assert set_env.load("PYTHONIOENCODING") == "utf-8"
+
+
+def test_set_env_expansion_unconditional_clears_marker(eval_set_env: EvalSetEnv, monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setenv("MAGIC", "FOO=conditional; sys_platform == 'nonexistent'\nFOO=unconditional")
+    set_env = eval_set_env("[testenv]\npackage=skip\nset_env={env:MAGIC}")
+    assert "FOO" in set_env
+    assert set_env.load("FOO") == "unconditional"
+
+
 def test_set_env_marker_mixed(eval_set_env: EvalSetEnv) -> None:
     marker = f"sys_platform == '{sys.platform}'"
     config = (

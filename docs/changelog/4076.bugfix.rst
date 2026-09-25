@@ -1,0 +1,2 @@
+Clear obsolete markers when unconditional ``set_env`` values are applied through ``SetEnv.update`` (for example CLI
+overrides or forced values such as ``PYTHONIOENCODING``) or through lines expanded from substitutions.

@@ -210,7 +210,8 @@ class SetEnv:
                     key, value, marker = self._extract_key_value_marker(sub_line)
                     if key not in self._raw and key not in self._defined_keys:
                         sub_raw[key] = value
-                    if marker:
+                        self._set_marker(key, marker)
+                    elif marker:
                         self._markers[key] = Marker(marker)
             self._materialized = {k: v for k, v in self._materialized.items() if k not in sub_raw}
             self._raw.update(sub_raw)
@@ -219,12 +220,19 @@ class SetEnv:
                 if self._marker_matches(key):
                     yield key
 
+    def _set_marker(self, key: str, marker: str) -> None:
+        if marker:
+            self._markers[key] = Marker(marker)
+        else:
+            self._markers.pop(key, None)  # an unconditional set clears any previous marker
+
     def update(self, param: Mapping[str, str] | SetEnv, *, override: bool = True) -> None:
         for key in param:
             # do not override something already set explicitly
             if override or (key not in self._raw and key not in self._materialized):
                 value = param.load(key) if isinstance(param, SetEnv) else param[key]
                 self._materialized[key] = value
+                self._markers.pop(key, None)
                 self.changed = True
 
 
