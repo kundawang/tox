@@ -309,6 +309,25 @@ def test_parallel_fail_fast_lets_running_finish(tox_project: ToxProjectCreator) 
     assert "b: OK" in outcome.out
 
 
+def test_parallel_fail_fast_exit_code_is_first_chronological_failure(tox_project: ToxProjectCreator) -> None:
+    """Documented contract: the fail-fast exit code is the first failure in time, not in environment list order."""
+    toml = dedent("""\
+        env_list = ["a", "b"]
+        [env_run_base]
+        package = "skip"
+        [env.a]
+        commands = [["python", "-c", "import time; time.sleep(1.5); raise SystemExit(8)"]]
+        [env.b]
+        commands = [["python", "-c", "raise SystemExit(7)"]]
+    """)
+    project = tox_project({"tox.toml": toml})
+
+    outcome = project.run("p", "-p", "2", "--fail-fast")
+
+    outcome.assert_failed(code=7)
+    assert "a: FAIL code 8" in outcome.out  # the environment already running was allowed to finish
+
+
 def test_parallel_spinner_stays_out_of_non_tty_output(tox_project: ToxProjectCreator) -> None:
     """Redirected output must hold plain text, not spinner control sequences."""
     toml = dedent("""\

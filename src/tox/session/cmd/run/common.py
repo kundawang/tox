@@ -157,8 +157,14 @@ def env_run_create_flags(
         )
 
 
-def report(
-    start: float, runs: list[ToxEnvRunResult], *, is_colored: bool, verbosity: int, fail_fast: bool = False
+def report(  # ruff:ignore[too-many-arguments]
+    start: float,
+    runs: list[ToxEnvRunResult],
+    *,
+    is_colored: bool,
+    verbosity: int,
+    fail_fast: bool = False,
+    completion_order: list[ToxEnvRunResult] | None = None,
 ) -> int:
     def _print(color_: str, message: str) -> None:
         if verbosity:
@@ -184,9 +190,14 @@ def report(
     if len(runs) == 1:
         return runs[0].code if not runs[0].skipped else 1
     if fail_fast:
-        # under fail fast the run stops at the first failure, whose code is the documented overall exit code
+        # under fail fast the run stops at the first failure, whose code is the documented overall exit code;
+        # "first" is chronological (completion order), not the environment list order used for the report
         first_failed = next(
-            (r for r in runs if not r.skipped and not r.ignore_outcome and not r.unavailable and r.code != Outcome.OK),
+            (
+                r
+                for r in (completion_order if completion_order is not None else runs)
+                if not r.skipped and not r.ignore_outcome and not r.unavailable and r.code != Outcome.OK
+            ),
             None,
         )
         if first_failed is not None:
@@ -299,6 +310,7 @@ def execute(state: State, max_workers: int | None, has_spinner: bool, live: bool
             verbosity=state.conf.options.verbosity,
             fail_fast=state.conf.options.fail_fast
             or any(cast("RunToxEnv", state.envs[env]).conf["fail_fast"] for env in to_run_list),
+            completion_order=results,
         )
         if has_previous:
             signal(SIGINT, previous)
